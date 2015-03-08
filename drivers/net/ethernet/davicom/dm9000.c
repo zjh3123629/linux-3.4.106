@@ -42,6 +42,10 @@
 
 #include "dm9000.h"
 
+#if defined(CONFIG_ARCH_S3C24XX)
+#include <mach/regs-mem.h>
+#endif
+
 /* Board/System/Debug information/definition ---------------- */
 
 #define DM9000_PHY		0x40	/* PHY address 0x01 */
@@ -1290,7 +1294,12 @@ dm9000_open(struct net_device *dev)
 	dm9000_reset(db);
 	dm9000_init_dm9000(dev);
 
-	if (request_irq(dev->irq, dm9000_interrupt, irqflags, dev->name, dev))
+#if defined (CONFIG_ARCH_S3C24XX)
+	if (request_irq(dev->irq, &dm9000_interrupt, IRQF_SHARED|IRQF_TRIGGER_RISING, dev->name, dev))
+#else
+	if (request_irq(dev->irq, &dm9000_interrupt, IRQF_SHARED, dev->name, dev))
+#endif 
+	//if (request_irq(dev->irq, dm9000_interrupt, irqflags, dev->name, dev))
 		return -EAGAIN;
 
 	/* Init driver variable */
@@ -1371,6 +1380,10 @@ dm9000_probe(struct platform_device *pdev)
 	int iosize;
 	int i;
 	u32 id_val;
+#if defined(CONFIG_ARCH_S3C24XX)
+	unsigned int oldval_bwscon = *(volatile unsigned int *)S3C2410_BWSCON;
+	unsigned int oldval_bankcon4 = *(volatile unsigned int *)S3C2410_BANKCON4;
+#endif 
 
 	/* Init network device */
 	ndev = alloc_etherdev(sizeof(struct board_info));
@@ -1380,6 +1393,11 @@ dm9000_probe(struct platform_device *pdev)
 	SET_NETDEV_DEV(ndev, &pdev->dev);
 
 	dev_dbg(&pdev->dev, "dm9000_probe()\n");
+
+#if defined(CONFIG_ARCH_S3C24XX)
+	*((volatile unsigned int *)S3C2410_BWSCON) = (oldval_bwscon & ~(3<<16)) | S3C2410_BWSCON_DW4_16 | S3C2410_BWSCON_WS4 | S3C2410_BWSCON_ST4;
+	*((volatile unsigned int *)S3C2410_BANKCON4) = 0x1f7c;
+#endif
 
 	/* setup board info structure */
 	db = netdev_priv(ndev);
@@ -1568,6 +1586,16 @@ dm9000_probe(struct platform_device *pdev)
 	db->mii.mdio_read    = dm9000_phy_read;
 	db->mii.mdio_write   = dm9000_phy_write;
 
+#if defined(CONFIG_ARCH_S3C24XX)
+	printk("Now use the default MAC address: 08:90:90:90:90:90\n");
+	mac_src = "zhouzuoyu";
+	ndev->dev_addr[0] = 0x08;
+	ndev->dev_addr[1] = 0x90;
+	ndev->dev_addr[2] = 0x90;
+	ndev->dev_addr[3] = 0x90;
+	ndev->dev_addr[4] = 0x90;
+	ndev->dev_addr[5] = 0x90;
+#else 
 	mac_src = "eeprom";
 
 	/* try reading the node address from the attached EEPROM */
@@ -1594,7 +1622,7 @@ dm9000_probe(struct platform_device *pdev)
 		eth_hw_addr_random(ndev);
 		mac_src = "random";
 	}
-
+#endif
 
 	platform_set_drvdata(pdev, ndev);
 	ret = register_netdev(ndev);
@@ -1608,6 +1636,11 @@ dm9000_probe(struct platform_device *pdev)
 
 out:
 	dev_err(db->dev, "not found (%d).\n", ret);
+
+#if defined(CONFIG_ARCH_S3C24XX)
+	*(volatile unsigned int *)S3C2410_BWSCON = oldval_bwscon;
+	*(volatile unsigned int *)S3C2410_BANKCON4 = oldval_bankcon4;
+#endif
 
 	dm9000_release_board(pdev, db);
 	free_netdev(ndev);
